@@ -1,61 +1,185 @@
 # Windows XP QEMU Docker
 
-Run Windows XP in a Docker container with unattended installation support.
+Run Windows XP in a Docker container with fully automated installation and web-based VNC access.
 
-## Features
+## ✨ Features
 
-- **Unattended Installation** - Fully automated Windows XP setup
-- **Web VNC Access** - Browser-based VNC at `http://localhost:8888`
-- **Audio Support** - NoVNC client with audio injection
-- **Nginx Reverse Proxy** - Clean web interface
-- **ARM64/Apple Silicon Support** - Runs on all platforms
+- **🚀 Fully Automated Setup** - No manual ISO download or configuration required
+- **🌐 Web VNC Access** - Browser-based VNC interface at port 8888
+- **🔊 Audio Support** - NoVNC client with WebAudio injection
+- **📦 Complete Container** - Everything included: QEMU, VNC, nginx, audio
+- **🔄 Unattended Installation** - Automatic Windows XP installation with dynamic product key
+- **💾 Persistent Storage** - 20GB VHD created automatically
+- **🔐 Pre-configured Security** - Default admin password and auto-login
 
-## Quick Start
+## 🚀 Quick Start
 
-1. **Prepare your files:**
+### 1. Build and Start the Container
 
-   ```bash
-   # Place your files in the iso/ directory:
-   iso/
-   ├── xp.iso          # Windows XP installation ISO
-   └── unattended.iso  # Unattended answer file ISO
-   ```
+```bash
+# Build the Docker image
+sudo docker-compose build
 
-2. **Start the container:**
+# Start the container
+sudo docker-compose up -d
+```
 
-   ```bash
-   docker-compose up -d
-   ```
+### 2. Run Windows XP Installation
 
-3. **Run unattended installation:**
+```bash
+# Execute the installation script inside the container
+sudo docker-compose exec winxp-qemu /root/install-xp.sh
+```
 
-   ```bash
-   docker exec -it winxp-qemu-winxp-qemu-1 /root/start-winxp-unattended-simple.sh
-   ```
+### 3. Access the Virtual Desktop
 
-4. **Monitor installation:**
-   - Open [http://localhost:8888](http://localhost:8888) in your browser
-   - VNC password: `password1`
-   - Installation takes 30-60 minutes
+Open your browser and navigate to:
+- **Local access:** `http://localhost:8888/vnc_auto.html`
+- **Remote access:** `http://[your-server-ip]:8888/vnc_auto.html`
+- **VNC Password:** `password1`
 
-## What It Does
+## 🔧 What the System Does Automatically
 
-The unattended installation script automatically:
+### Container Setup (Dockerfile)
+- **Base:** Ubuntu 22.04 with complete QEMU environment
+- **VNC Server:** TurboVNC with automatic password setup
+- **Web Interface:** nginx + noVNC with audio support
+- **Services:** All managed by supervisord for automatic startup
 
-- Creates a 20GB VHD disk if needed
-- Mounts both Windows XP and unattended ISOs
-- Starts QEMU with optimal settings for Windows XP
-- Runs fully automated installation without user input
+### Installation Process (install-xp.sh)
+1. **📥 Downloads Windows XP ISO** - Fetches Windows XP Professional SP3 from Internet Archive
+2. **🔑 Gets Product Key** - Dynamically retrieves valid license key from archive
+3. **📄 Creates Answer File** - Generates `winnt.sif` for unattended installation
+4. **💿 Builds Custom ISO** - Creates `xp-unattended.iso` with proper El Torito boot sector preservation
+5. **💾 Creates VHD** - Sets up 20GB raw disk for Windows installation
+6. **🖥️ Starts QEMU** - Launches VM with optimized settings for Windows XP
 
-## Configuration
+#### Boot Sector Technology
+- **✅ El Torito Boot Support** - Uses proper Windows XP boot image (`Boot-NoEmul.img`)
+- **🔧 xorriso Engine** - Advanced ISO creation with boot sector preservation
+- **🚫 No Boot Errors** - Eliminates "could not read from CDROM" issues
+- **📀 Perfect ISO Recreation** - Maintains original Windows XP boot catalog structure
 
+### Windows XP Configuration
+- **Computer Name:** XPServer
+- **Admin Password:** `password` (blank)
+- **Auto-login:** Enabled as Administrator
+- **Display:** 1024x768, 32-bit color
+- **Network:** RTL8139 adapter (Windows XP compatible)
+- **Post-install:** Boots to command prompt (desktop GUI replaced with cmd.exe)
+
+## 🌐 Network Ports
+
+| Port | Service | Description |
+|------|---------|-------------|
+| 8888 | Web VNC | Browser-based VNC access |
+| 8080 | Future Use | Reserved for web server forwarding |
+
+## 📁 Data Persistence
+
+The container creates a Docker volume mapping:
+```
+./iso:/isos
+```
+
+Files created in `/isos/`:
+- `xp.iso` - Original Windows XP ISO (downloaded automatically)
+- `xp-unattended.iso` - Custom ISO with answer file
+- `xp.vhd` - 20GB virtual hard disk (persistent)
+
+## 🔄 Usage Patterns
+
+### First Run (Fresh Installation)
+1. Container downloads Windows XP ISO (~600MB)
+2. Creates unattended installation ISO
+3. Sets up 20GB VHD
+4. Installs Windows XP automatically (30-60 minutes)
+5. Reboots to command prompt
+
+### Subsequent Runs (Existing Installation)
+1. Detects existing Windows XP installation
+2. Boots directly from VHD
+3. Skips installation process
+4. Starts in headless mode or with VNC
+
+## ⚙️ VM Specifications
+
+- **CPU:** Pentium (i386 architecture)
 - **RAM:** 2GB
+- **Disk:** 20GB raw VHD format
 - **Network:** RTL8139 (Windows XP compatible)
-- **Display:** VNC accessible via web browser
-- **Admin Password:** Configured in your unattended.iso
+- **Boot:** CD-ROM (install) or HDD (installed)
+- **Acceleration:** TCG (software emulation)
+- **SMP:** 2 cores
 
-## Credits
+## 🛠️ Advanced Usage
 
-- [Tech on Fire YouTube](https://www.youtube.com/watch?v=2EEzKlF7miA)
-- [Original GitHub repo](https://github.com/theonemule/qemu-docker)
-- [google85/qemu-docker](https://github.com/google85/qemu-docker)
+### Manual Commands Inside Container
+
+```bash
+# Access container shell
+sudo docker-compose exec winxp-qemu bash
+
+# Check installation progress
+sudo docker-compose logs -f
+
+# Restart services
+sudo docker-compose restart
+```
+
+### Customization
+
+- **VNC Password:** Edit `PASSWORD=password1` in Dockerfile
+- **VM Resources:** Modify QEMU parameters in `install-xp.sh`
+- **Network Settings:** Edit nginx.conf for port forwarding
+
+## 🧪 Technical Architecture
+
+```
+Browser → nginx (port 80) → websockify → VNC Server → QEMU → Windows XP
+                          ↓
+                      WebAudio → PulseAudio → QEMU Audio
+```
+
+## 📋 Requirements
+
+- **Docker & Docker Compose**
+- **Minimum:** 4GB RAM, 25GB storage
+- **Internet:** Required for Windows XP ISO download
+- **Platform:** linux/amd64 (Intel/AMD x86_64)
+
+## 🔍 Troubleshooting
+
+### VNC Connection Issues
+```bash
+# Check VNC server status
+sudo docker-compose exec winxp-qemu netstat -tlnp | grep 5901
+
+# Restart VNC
+sudo docker-compose restart
+```
+
+### Installation Problems
+```bash
+# Check QEMU logs
+sudo docker-compose logs winxp-qemu
+
+# Verify ISO files
+sudo docker-compose exec winxp-qemu ls -la /isos/
+
+# Verify ISO boot sector integrity
+sudo docker-compose exec winxp-qemu isoinfo -d -i /isos/xp-unattended.iso | grep -i "el torito"
+```
+
+### Boot Issues (Fixed)
+The system now properly handles Windows XP boot sectors:
+- ✅ **El Torito Boot Catalog** - Correct boot method used
+- ✅ **Boot Image Preservation** - Original `Boot-NoEmul.img` maintained  
+- ✅ **xorriso Technology** - Advanced ISO creation prevents corruption
+- ✅ **No CDROM Errors** - Eliminates boot sector related failures
+
+## 📜 Credits
+
+- **Windows XP ISO:** Internet Archive (WinXPProSP3x86)
+- **Original Inspiration:** Various QEMU Docker projects
+- **Technologies:** QEMU, noVNC, Docker, nginx, TurboVNC

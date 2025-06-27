@@ -5,12 +5,10 @@ services:
     # Use pre-built baked image if available, otherwise build from source
     # To use baked image: docker-compose up -d
     # To rebuild from source: docker-compose build --no-cache && docker-compose up -d
-    image: winxp-qemu-baked:latest
-    # build:
-    #   context: .
-    #   dockerfile: Dockerfile
-    #   platforms:
-    #     - linux/amd64
+    # image: winxp-qemu-baked:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     platform: linux/amd64
     ports:
       - "8888:80" # Web VNC access

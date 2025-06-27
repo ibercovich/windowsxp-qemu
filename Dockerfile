@@ -56,7 +56,6 @@ COPY /etc/supervisor/supervisord.conf /etc/supervisor/supervisord.conf
 
 # Copy our custom scripts
 COPY install-xp.sh /root/install-xp.sh
-COPY unattend.txt /root/unattend.txt
 
 # Make scripts executable
 RUN chmod +x /root/install-xp.sh

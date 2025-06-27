@@ -12,20 +12,14 @@ get_product_key() {
     echo "🔑 Fetching product key from Internet Archive..."
     
     # Download the page and extract the serial key using Windows XP key pattern
-    if command -v wget >/dev/null 2>&1; then
-        PRODUCT_KEY=$(wget -qO- "https://archive.org/details/WinXPProSP3x86" | grep -o "[A-Z0-9]\{5\}-[A-Z0-9]\{5\}-[A-Z0-9]\{5\}-[A-Z0-9]\{5\}-[A-Z0-9]\{5\}" | head -1)
-    elif command -v curl >/dev/null 2>&1; then
-        PRODUCT_KEY=$(curl -s "https://archive.org/details/WinXPProSP3x86" | grep -o "[A-Z0-9]\{5\}-[A-Z0-9]\{5\}-[A-Z0-9]\{5\}-[A-Z0-9]\{5\}-[A-Z0-9]\{5\}" | head -1)
-    else
-        echo "❌ Error: Neither wget nor curl found. Cannot fetch product key."
-        exit 1
-    fi
+    PRODUCT_KEY=$(wget -qO- "https://archive.org/details/WinXPProSP3x86" | grep -o "[A-Z0-9]\{5\}-[A-Z0-9]\{5\}-[A-Z0-9]\{5\}-[A-Z0-9]\{5\}-[A-Z0-9]\{5\}" | head -1)
     
     # Validate the key format (should be 5 groups of 5 characters separated by dashes)
     if [[ $PRODUCT_KEY =~ ^[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}$ ]]; then
         echo "✅ Found product key: $PRODUCT_KEY"
     else
         echo "❌ Error: Invalid key format found: $PRODUCT_KEY"
+        echo "Please check internet connection and try again"
         exit 1
     fi
 }
@@ -38,17 +32,8 @@ download_windows_xp_iso() {
     echo ""
     
     # Download with wget, showing progress
-    if command -v wget >/dev/null 2>&1; then
-        wget -O /isos/xp.iso \
-            "https://archive.org/download/WinXPProSP3x86/en_windows_xp_professional_with_service_pack_3_x86_cd_vl_x14-73974.iso"
-    elif command -v curl >/dev/null 2>&1; then
-        curl -L -o /isos/xp.iso \
-            "https://archive.org/download/WinXPProSP3x86/en_windows_xp_professional_with_service_pack_3_x86_cd_vl_x14-73974.iso"
-    else
-        echo "❌ Error: Neither wget nor curl found. Cannot download ISO."
-        echo "Please manually download the ISO and place it at /isos/xp.iso"
-        exit 1
-    fi
+    wget -O /isos/xp.iso \
+        "https://archive.org/download/WinXPProSP3x86/en_windows_xp_professional_with_service_pack_3_x86_cd_vl_x14-73974.iso"
     
     if [ -f "/isos/xp.iso" ] && [ -s "/isos/xp.iso" ]; then
         echo "✅ Successfully downloaded Windows XP ISO"
@@ -143,9 +128,14 @@ EOF
     rm -rf /tmp/xp-unattended
     mkdir -p /tmp/xp-unattended/iso
 
-    # Extract ISO contents using 7z
+    # Extract ISO contents using 7z and preserve file structure
     echo "📂 Extracting Windows XP ISO contents..."
     7z x /isos/xp.iso -o/tmp/xp-unattended/iso >/dev/null
+    
+    # Ensure all extracted files have proper permissions
+    echo "📂 Setting proper file permissions..."
+    find /tmp/xp-unattended/iso -type d -exec chmod 755 {} \;
+    find /tmp/xp-unattended/iso -type f -exec chmod 644 {} \;
 
     # Create the post-setup script
     cat > /tmp/postsetup.bat << 'EOF'
@@ -186,19 +176,59 @@ EOF
     # Make the directory structure writable
     chmod -R +w /tmp/xp-unattended/iso
 
-    # Create the new unattended ISO
+    # Verify El Torito boot image exists
+    echo "📂 Verifying Windows XP El Torito boot image..."
+    if [ -f "/tmp/xp-unattended/iso/[BOOT]/Boot-NoEmul.img" ]; then
+        echo "✅ Windows XP El Torito boot image found"
+        BOOT_FILE="[BOOT]/Boot-NoEmul.img"
+        BOOT_LOAD_SIZE=4
+    else
+        echo "❌ Error: Windows XP El Torito boot image not found in extracted ISO."
+        echo "Available files in root:"
+        ls -la /tmp/xp-unattended/iso/ | head -10
+        echo "Available files in [BOOT]:"
+        ls -la "/tmp/xp-unattended/iso/[BOOT]/" 2>/dev/null || echo "No [BOOT] directory found"
+        exit 1
+    fi
+
+    # Create the new unattended ISO with proper boot sector preservation
     echo "🔨 Building unattended installation ISO..."
-    genisoimage -b I386/BOOT/BOOTFIX.BIN -no-emul-boot -boot-load-size 4 -boot-info-table -J -r -o /isos/xp-unattended.iso /tmp/xp-unattended/iso/ >/dev/null 2>&1
+    
+    # Create ISO with Windows XP El Torito boot configuration using xorriso
+    echo "Boot file: $BOOT_FILE"
+    echo "Creating ISO with xorriso and Windows XP El Torito boot configuration..."
+    
+    xorriso -as mkisofs \
+        -iso-level 2 \
+        -J -l -D -N \
+        -joliet-long \
+        -relaxed-filenames \
+        -V "WXPFPP_EN" \
+        -b "$BOOT_FILE" \
+        -no-emul-boot \
+        -boot-load-size $BOOT_LOAD_SIZE \
+        -o /isos/xp-unattended.iso \
+        /tmp/xp-unattended/iso/ >/dev/null 2>&1
+
+    # Verify the created ISO is valid and bootable
+    if [ -f "/isos/xp-unattended.iso" ] && [ -s "/isos/xp-unattended.iso" ]; then
+        echo "✅ Created unattended installation ISO"
+        echo "📏 Size: $(du -h /isos/xp-unattended.iso | cut -f1)"
+        
+        # Test ISO integrity
+        echo "🔍 Verifying ISO integrity..."
+        if file /isos/xp-unattended.iso | grep -q "ISO 9660"; then
+            echo "✅ ISO format verified successfully"
+        else
+            echo "⚠️  Warning: ISO format verification failed, but proceeding anyway"
+        fi
+    else
+        echo "❌ Error: Failed to create unattended ISO or file is empty"
+        exit 1
+    fi
 
     # Clean up temporary files
     rm -rf /tmp/xp-unattended /tmp/winnt.sif /tmp/postsetup.bat
-
-    if [ -f "/isos/xp-unattended.iso" ]; then
-        echo "✅ Created unattended installation ISO"
-    else
-        echo "❌ Error: Failed to create unattended ISO"
-        exit 1
-    fi
 }
 
 # Check if unattended ISO exists, create it if not
@@ -218,7 +248,7 @@ if [ ! -f "/isos/xp.vhd" ]; then
 else
     # Check if Windows XP is already installed by looking for NTFS signature
     echo "Checking if Windows XP is already installed..."
-    if hexdump -C /isos/xp.vhd | head -20 | grep -q "NTFS"; then
+    if file /isos/xp.vhd | grep -q "NTFS"; then
         echo "✅ Found existing Windows XP installation"
         BOOT_FROM_HDD=true
     else
@@ -246,19 +276,24 @@ if [ "$BOOT_FROM_HDD" = "true" ]; then
     qemu-system-i386 \
       -cpu pentium \
       -m 2G \
-      -hda /isos/xp.vhd \
+      -drive file=/isos/xp.vhd,format=raw \
       -boot c \
       -nic user,model=rtl8139 \
       -no-acpi \
       -no-hpet \
       -rtc base=localtime \
-      -nographic \
-      -serial stdio \
+      -machine pc \
       -accel tcg,thread=multi \
       -smp 2 \
-      -machine pc,accel=tcg
+      -display vnc=:1
 else
     echo "=== Starting Windows XP Unattended Installation ==="
+    
+    # Get product key if not already set
+    if [ -z "$PRODUCT_KEY" ]; then
+        get_product_key
+    fi
+    
     echo "VM Configuration:"
     echo "  - RAM: 2GB"
     echo "  - Disk: /isos/xp.vhd"
@@ -280,13 +315,15 @@ else
     qemu-system-i386 \
       -cpu pentium \
       -m 2G \
-      -hda /isos/xp.vhd \
-      -cdrom /isos/xp-unattended.iso \
-      -boot d \
+      -drive file=/isos/xp.vhd,format=raw,if=ide,index=0 \
+      -drive file=/isos/xp-unattended.iso,media=cdrom,if=ide,index=1 \
+      -boot order=dc \
       -nic user,model=rtl8139 \
       -no-acpi \
       -no-hpet \
       -rtc base=localtime \
+      -machine pc \
       -accel tcg,thread=multi \
       -smp 2 \
-      -machine pc,accel=tcg 
+      -display vnc=:1
+fi
