@@ -1,13 +1,27 @@
-version: "3.6"
+version: "3.8"
 
 services:
-  win-xp:
-    image: google85/qemu-docker:win-xp
-    container_name: win-xp
+  winxp-qemu:
+    # Use pre-built baked image if available, otherwise build from source
+    # To use baked image: docker-compose up -d
+    # To rebuild from source: docker-compose build --no-cache && docker-compose up -d
+    image: winxp-qemu-baked:latest
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    #   platforms:
+    #     - linux/amd64
+    platform: linux/amd64
+    ports:
+      - "8888:80" # Web VNC access
+      - "8080:8080" # For future web server forwarding
+    volumes:
+      - ./iso:/isos # Mount iso directory for Windows XP files
     environment:
       - USER=root
       - PASSWORD=password1
-    volumes:
-      - .:/isos
-    ports:
-      - 8888:80
+      - DISPLAY=:1
+    privileged: false
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
