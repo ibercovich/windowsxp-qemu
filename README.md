@@ -87,6 +87,19 @@ Files created in `/isos/`:
 - `xp-unattended.iso` - Custom ISO with answer file
 - `xp.vhd` - 20GB virtual hard disk (persistent)
 
+### 📂 File Naming Requirements
+
+**Important:** The monitoring system expects specific file names:
+
+- **Virtual Disk:** Must be named `xp.vhd` and located in `/isos/` directory
+- **Location:** `/isos/xp.vhd` (hardcoded in monitoring scripts)
+
+If you use different file names, the monitoring functions will not work properly. The system is designed around this convention for:
+- Disk initialization status checks
+- Installation progress monitoring  
+- Boot sector analysis
+- Blue pixel correlation with disk activity
+
 ## 🔄 Usage Patterns
 
 ### First Run (Fresh Installation)
@@ -126,6 +139,30 @@ sudo docker-compose logs -f
 # Restart services
 sudo docker-compose restart
 ```
+
+### 📊 Installation Monitoring
+
+The system includes a comprehensive monitoring script:
+
+```bash
+# Full status with all checks (default)
+sudo docker-compose exec winxp-qemu /monitor-vm.sh status
+
+# Continuous monitoring (refreshes every 10 seconds)
+sudo docker-compose exec winxp-qemu /monitor-vm.sh watch
+
+# Individual checks
+sudo docker-compose exec winxp-qemu /monitor-vm.sh init       # Disk initialization
+sudo docker-compose exec winxp-qemu /monitor-vm.sh blue       # Blue pixel analysis
+sudo docker-compose exec winxp-qemu /monitor-vm.sh screenshot # Continuous screenshots
+```
+
+**Monitoring Features:**
+- **🔧 Boot Sector Analysis** - Validates MBR and NTFS partition
+- **💾 Disk Activity** - Tracks VHD growth and write activity  
+- **🔵 Blue Pixel Detection** - Analyzes Windows XP interface via VNC screenshots
+- **📊 Installation Phases** - Estimates current installation stage
+- **🖥️ Process Monitoring** - CPU, memory, and runtime statistics
 
 ### Customization
 

@@ -87,8 +87,8 @@ OemSkipWelcome=1
 
 [UserData]
 ProductKey="$PRODUCT_KEY"
-FullName="Administrator"
-OrgName="MyOrg"
+FullName="tb-admin"
+OrgName="tb"
 ComputerName=XPServer
 
 [Display]
@@ -119,7 +119,9 @@ DefaultStartPanelOff=Yes
 DefaultThemesOff=Yes
 
 [GuiRunOnce]
-Command0="%SystemDrive%\install\postsetup.bat"
+; Copy post-setup script from CD-ROM to hard drive and execute it
+Command0="cmd /c copy D:\install\postsetup.bat %SystemDrive%\postsetup.bat"
+Command1="%SystemDrive%\postsetup.bat"
 EOF
 
     echo "📝 Created unattended answer file"
@@ -141,26 +143,64 @@ EOF
     cat > /tmp/postsetup.bat << 'EOF'
 @echo off
 echo === Post-setup Configuration ===
+echo Starting Windows XP post-installation configuration...
 
-:: Delete OOBE (welcome wizard)
-del /f /q "%SystemRoot%\system32\oobe\msoobe.exe"
-reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce" /v SkipOOBE /d "cmd /c del /f /q %SystemRoot%\system32\oobe\msoobe.exe" /f >nul 2>&1
+:: Create C:\install directory if it doesn't exist for compatibility
+if not exist "C:\install" mkdir "C:\install"
 
-:: Autologon as Administrator
-reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v AutoAdminLogon /d 1 /f
-reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v DefaultUserName /d "Administrator" /f
-reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v DefaultPassword /d "" /f
-reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v DefaultDomainName /d "%COMPUTERNAME%" /f
+:: Delete OOBE (welcome wizard) - suppress errors if file doesn't exist
+echo Disabling Windows XP welcome wizard...
+if exist "%SystemRoot%\system32\oobe\msoobe.exe" (
+    del /f /q "%SystemRoot%\system32\oobe\msoobe.exe" >nul 2>&1
+    echo - Welcome wizard disabled
+) else (
+    echo - Welcome wizard already disabled or not found
+)
+
+:: Disable OOBE through registry as backup
+reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Setup\OOBE" /v MediaBootInstall /t REG_DWORD /d 1 /f >nul 2>&1
+
+:: Create tb-guest user account
+echo Creating tb-guest user account...
+net user tb-guest /add /passwordchg:no /passwordreq:no /comment:"Guest user account" >nul 2>&1
+if %errorlevel%==0 (
+    net localgroup Users tb-guest /add >nul 2>&1
+    echo - tb-guest user created successfully
+) else (
+    echo - tb-guest user already exists or creation failed
+)
+
+:: Configure autologon as tb-admin
+echo Configuring autologon for tb-admin...
+reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v AutoAdminLogon /d 1 /f >nul 2>&1
+reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v DefaultUserName /d "tb-admin" /f >nul 2>&1
+reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v DefaultPassword /d "password" /f >nul 2>&1
+reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v DefaultDomainName /d "%COMPUTERNAME%" /f >nul 2>&1
+echo - Autologon configured for tb-admin
 
 :: Force classic logon (disable welcome screen)
-reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v LogonType /t REG_DWORD /d 0 /f
+echo Configuring classic logon screen...
+reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v LogonType /t REG_DWORD /d 0 /f >nul 2>&1
+echo - Classic logon screen enabled
 
-:: Replace desktop GUI with cmd.exe
-reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v Shell /d "cmd.exe" /f
+:: Replace desktop GUI with cmd.exe for headless operation
+echo Configuring command-line shell...
+reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v Shell /d "cmd.exe" /f >nul 2>&1
+echo - Desktop replaced with command prompt
+
+:: Create a marker file to indicate post-setup completion
+echo Post-setup completed successfully > "C:\postsetup-completed.txt"
+echo %date% %time% >> "C:\postsetup-completed.txt"
 
 echo.
-echo Configuration complete. Will boot into text-mode cmd.exe as Administrator.
-exit
+echo === Configuration Complete ===
+echo Users created: tb-admin (admin) and tb-guest (standard)
+echo System will boot into command prompt as tb-admin
+echo Post-setup marker file: C:\postsetup-completed.txt
+echo.
+
+:: Exit successfully
+exit /b 0
 EOF
 
     # Copy the answer file to the ISO root and I386 directory
@@ -172,6 +212,15 @@ EOF
     echo "📝 Adding post-setup script to ISO..."
     mkdir -p /tmp/xp-unattended/iso/install
     cp /tmp/postsetup.bat /tmp/xp-unattended/iso/install/
+    
+    # Verify the post-setup script was copied correctly
+    if [ -f "/tmp/xp-unattended/iso/install/postsetup.bat" ]; then
+        echo "✅ Post-setup script added to ISO successfully"
+        echo "📋 Script size: $(du -h /tmp/xp-unattended/iso/install/postsetup.bat | cut -f1)"
+    else
+        echo "❌ Error: Failed to add post-setup script to ISO"
+        exit 1
+    fi
 
     # Make the directory structure writable
     chmod -R +w /tmp/xp-unattended/iso
@@ -242,14 +291,18 @@ fi
 # Create or check VHD
 if [ ! -f "/isos/xp.vhd" ]; then
     echo "Creating Windows XP virtual hard disk..."
-    qemu-img create -f raw /isos/xp.vhd 20G
-    echo "Created 20GB raw disk: /isos/xp.vhd"
+    qemu-img create -f raw /isos/xp.vhd 5G
+    echo "Created 5GB raw disk: /isos/xp.vhd"
     FRESH_INSTALL=true
 else
-    # Check if Windows XP is already installed by looking for NTFS signature
+    # Check if Windows XP is already installed by looking for Windows boot sector and NTFS partition
     echo "Checking if Windows XP is already installed..."
-    if file /isos/xp.vhd | grep -q "NTFS"; then
-        echo "✅ Found existing Windows XP installation"
+    VHD_INFO=$(file /isos/xp.vhd)
+    echo "   VHD info: $VHD_INFO"
+    
+    # Look for Windows XP indicators: MS-MBR, XP, ID=0x7 (NTFS), or "active" partition
+    if echo "$VHD_INFO" | grep -q -E "(MS-MBR.*XP|ID=0x7.*active|NTFS.*active|DOS/MBR.*partition)"; then
+        echo "✅ Found existing Windows XP installation - booting from hard drive"
         BOOT_FROM_HDD=true
     else
         echo "📀 Empty or unformatted disk - will install Windows XP"
@@ -276,7 +329,7 @@ if [ "$BOOT_FROM_HDD" = "true" ]; then
     qemu-system-i386 \
       -cpu pentium \
       -m 2G \
-      -drive file=/isos/xp.vhd,format=raw \
+      -drive file=/isos/xp.vhd,format=raw,cache=writeback \
       -boot c \
       -nic user,model=rtl8139 \
       -no-acpi \
@@ -285,7 +338,16 @@ if [ "$BOOT_FROM_HDD" = "true" ]; then
       -machine pc \
       -accel tcg,thread=multi \
       -smp 2 \
-      -display vnc=:1
+      -display vnc=:1 &
+    
+    # Get QEMU process ID
+    QEMU_PID=$!
+    echo "✅ QEMU started in background with PID: $QEMU_PID"
+    echo "🔗 Access via web VNC at: http://[ your-server-ip | localhost ]:8888/vnc.html"
+    echo "📊 Monitor VM status with: /monitor-vm.sh status"
+    echo ""
+    echo "🎯 Script completed successfully. Windows XP is booting..."
+    echo "💡 Use 'ps aux | grep qemu' to check if QEMU is still running"
 else
     echo "=== Starting Windows XP Unattended Installation ==="
     
@@ -300,7 +362,7 @@ else
     echo "  - ISO: xp-unattended.iso (with built-in winnt.sif)"
     echo "  - Mode: Fully Unattended Installation"
     echo "  - Product Key: $PRODUCT_KEY"
-    echo "  - Admin Password: password"
+    echo "  - Users: tb-admin (admin, password: password), tb-guest (standard user)"
     echo "  - Computer Name: XPServer"
     echo "  - Network: RTL8139 (Windows XP compatible)"
     echo ""
@@ -315,8 +377,8 @@ else
     qemu-system-i386 \
       -cpu pentium \
       -m 2G \
-      -drive file=/isos/xp.vhd,format=raw,if=ide,index=0 \
-      -drive file=/isos/xp-unattended.iso,media=cdrom,if=ide,index=1 \
+      -drive file=/isos/xp.vhd,format=raw,if=ide,index=0,cache=writeback \
+      -drive file=/isos/xp-unattended.iso,media=cdrom,if=ide,index=1,cache=writeback \
       -boot order=dc \
       -nic user,model=rtl8139 \
       -no-acpi \
@@ -325,5 +387,16 @@ else
       -machine pc \
       -accel tcg,thread=multi \
       -smp 2 \
-      -display vnc=:1
+      -display vnc=:1 &
+    
+    # Get QEMU process ID
+    QEMU_PID=$!
+    echo "✅ QEMU started in background with PID: $QEMU_PID"
+    echo "🔗 Access via web VNC at: http://[ your-server-ip | localhost ]:8888/vnc.html"
+    echo "📊 Monitor installation progress with: /monitor-vm.sh watch"
+    echo "📸 Check blue pixels (Windows interface): /monitor-vm.sh blue"
+    echo ""
+    echo "🎯 Script completed successfully. Windows XP installation started..."
+    echo "💡 Installation will take 30-60 minutes. Use monitoring commands above to track progress."
+    echo "🔍 Use 'ps aux | grep qemu' to check if QEMU is still running"
 fi
